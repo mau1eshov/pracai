@@ -1,0 +1,145 @@
+STATES = ["A", "B", "C", "D", "E", "S", "F", "H", "I"]
+TERMINALS = {"G", "X"}
+ACTIONS = ["UP", "DOWN", "LEFT", "RIGHT"]
+
+POSITIONS = {
+    "A": (0, 0), "B": (0, 1), "C": (0, 2), "G": (0, 3),
+    "D": (1, 0),               "E": (1, 2), "X": (1, 3),
+    "S": (2, 0), "F": (2, 1), "H": (2, 2), "I": (2, 3),
+}
+STATE_AT = {position: state for state, position in POSITIONS.items()}
+
+MOVES = {
+    "UP": (-1, 0),
+    "DOWN": (1, 0),
+    "LEFT": (0, -1),
+    "RIGHT": (0, 1),
+}
+
+PERPENDICULAR = {
+    "UP": ("LEFT", "RIGHT"),
+    "DOWN": ("RIGHT", "LEFT"),
+    "LEFT": ("DOWN", "UP"),
+    "RIGHT": ("UP", "DOWN"),
+}
+
+
+def move(state, direction):
+    row, col = POSITIONS[state]
+    dr, dc = MOVES[direction]
+    return STATE_AT.get((row + dr, col + dc), state)
+
+
+def reward(next_state, goal_reward=10.0, danger_reward=-10.0,
+           step_reward=-0.1):
+    if next_state == "G":
+        return goal_reward
+    if next_state == "X":
+        return danger_reward
+    return step_reward
+
+
+def transitions(state, action, intended_probability=0.8,
+                goal_reward=10.0, danger_reward=-10.0,
+                step_reward=-0.1):
+    """(ықтималдық, келесі күй, марапат) тізімін қайтарады."""
+    side_probability = (1.0 - intended_probability) / 2.0
+    left, right = PERPENDICULAR[action]
+    outcomes = [
+        (intended_probability, action),
+        (side_probability, left),
+        (side_probability, right),
+    ]
+    result = []
+    for probability, direction in outcomes:
+        next_state = move(state, direction)
+        result.append((
+            probability,
+            next_state,
+            reward(next_state, goal_reward, danger_reward, step_reward),
+        ))
+    return result
+
+
+def q_value(state, action, values, gamma=0.9, **params):
+    q = 0.0
+    for probability, next_state, current_reward in transitions(
+        state, action, **params
+    ):
+        next_value = 0.0 if next_state in TERMINALS else values[next_state]
+        q += probability * (current_reward + gamma * next_value)
+    return q
+
+
+def value_iteration(gamma=0.9, theta=0.001, **params):
+    values = {state: 0.0 for state in STATES}
+    history = [values.copy()]
+    iteration = 0
+
+    while True:
+        iteration += 1
+        new_values = {}
+        delta = 0.0
+
+        for state in STATES:
+            action_values = [
+                q_value(state, action, values, gamma, **params)
+                for action in ACTIONS
+            ]
+            new_values[state] = max(action_values)
+            delta = max(delta, abs(new_values[state] - values[state]))
+
+        values = new_values
+        history.append(values.copy())
+
+        if delta < theta:
+            break
+
+    policy = {}
+    all_q_values = {}
+    for state in STATES:
+        state_q = {
+            action: q_value(state, action, values, gamma, **params)
+            for action in ACTIONS
+        }
+        all_q_values[state] = state_q
+        policy[state] = max(ACTIONS, key=state_q.get)
+
+    return values, policy, all_q_values, history, iteration
+
+
+def print_run(title, gamma=0.9, **params):
+    values, policy, _, _, iterations = value_iteration(gamma=gamma, **params)
+    print(f"\n{title}")
+    print(f"Итерациялар саны: {iterations}")
+    for state in STATES:
+        print(f"{state}: V={values[state]:.3f}, саясат={policy[state]}")
+
+
+if __name__ == "__main__":
+    baseline = value_iteration()
+    values, policy, q_values, history, iterations = baseline
+
+    print("V0, V1 және V2")
+    for state in ["C", "E", "H", "I"]:
+        print(
+            f"{state}: V0={history[0][state]:.3f}, "
+            f"V1={history[1][state]:.3f}, V2={history[2][state]:.3f}"
+        )
+
+    print_run("Негізгі есеп")
+
+    print("\nНегізгі есептегі барлық Q-мәндері")
+    for state in STATES:
+        values_text = ", ".join(
+            f"{action}={q_values[state][action]:.3f}" for action in ACTIONS
+        )
+        print(f"{state}: {values_text}; ең жақсысы={policy[state]}")
+
+    print_run("Эксперимент 1: gamma = 0.2", gamma=0.2)
+    print_run(
+        "Эксперимент 2: негізгі бағыт ықтималдығы = 0.6",
+        intended_probability=0.6,
+    )
+    print_run("Эксперимент 3: X марапаты = -30", danger_reward=-30.0)
+    print_run("Эксперимент 4: қадам марапаты = -1", step_reward=-1.0)
